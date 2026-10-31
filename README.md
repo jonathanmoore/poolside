@@ -2,6 +2,19 @@
 
 A personal iOS app for a Pentair ScreenLogic pool system. Works on home WiFi and away from home. See SPEC.md for what it does and why.
 
+## Design
+
+These are mockups drawn from the SwiftUI layout, not screenshots from a phone. Real screenshots come once it's built and running.
+
+<p>
+<img src="docs/screens/home-dark.png" width="200" alt="Home screen, dark">
+<img src="docs/screens/home-light.png" width="200" alt="Home screen, light">
+<img src="docs/screens/heat-dark.png" width="200" alt="Heat sheet">
+<img src="docs/screens/signin-dark.png" width="200" alt="Sign in">
+</p>
+
+Home shows pool and spa as big tiles with the water temp, then features and lights. Tap a body for the heat sheet: on or off, heat mode and target temp. Sign in takes the system name, and the remote password only matters away from home.
+
 ## Run it on your phone
 
 1. Open `Poolside.xcodeproj` in Xcode 16 or newer. (If it won't open, `brew install xcodegen && xcodegen` in this folder rebuilds it from `project.yml`.)
