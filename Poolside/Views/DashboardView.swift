@@ -1,62 +1,351 @@
 import SwiftUI
 
+enum PoolTab: String, CaseIterable, Identifiable {
+    case pool, spa, lights
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .pool: return "Pool"
+        case .spa: return "Spa"
+        case .lights: return "Lights"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .pool: return "figure.pool.swim"
+        case .spa: return "water.waves"
+        case .lights: return "lightbulb.fill"
+        }
+    }
+
+}
+
+enum Palette {
+    static let blue = Color(red: 0.0, green: 0.55, blue: 0.9)
+    static let warm = Color(red: 0.95, green: 0.42, blue: 0.22)
+    static let fire = Color(red: 0.88, green: 0.16, blue: 0.14)
+
+    static let coolDial = [Color(red: 0.3, green: 0.8, blue: 1), Color(red: 0.0, green: 0.55, blue: 0.95),
+                           Color(red: 0.2, green: 0.35, blue: 0.95)]
+    static let warmDial = [Color.yellow, .orange, Color(red: 1, green: 0.35, blue: 0.3), Color(red: 1, green: 0.2, blue: 0.5)]
+
+    /// System background with a faint wash at the top: blue, or the warm glow while heating.
+    static func background(warm: Bool) -> some View {
+        let wash = warm ? Palette.warm : Palette.blue
+        return ZStack {
+            Color(.systemGroupedBackground)
+            LinearGradient(colors: [wash.opacity(0.24), wash.opacity(0.0)],
+                           startPoint: .top, endPoint: .center)
+        }
+    }
+}
+
+/// SF Symbols fill their space unevenly (the swimmer is wide and short, the waves tall and heavy).
+/// This draws each one into the same box, scaled to cover the same area at the same weight,
+/// so the three tab icons look balanced.
+enum TabIcon {
+    private static let box = CGSize(width: 34, height: 28)
+    private static let area: CGFloat = 30 * 22
+    /// Optical touch-ups: dense shapes look bigger than sparse ones of the same size.
+    private static let weight: [String: CGFloat] = ["water.waves": 0.88, "lightbulb.fill": 1.05,
+                                                    "lightbulb.max.fill": 1.15]
+
+    private static var cache: [String: Image] = [:]
+
+    /// Cached so redraws hand the tab bar the same image; a new one makes the tabs rebuild.
+    static func image(_ name: String) -> Image {
+        if let hit = cache[name] { return hit }
+        let made = draw(name)
+        cache[name] = made
+        return made
+    }
+
+    private static func draw(_ name: String) -> Image {
+        let probe = UIImage.SymbolConfiguration(pointSize: 20, weight: .semibold)
+        guard let base = UIImage(systemName: name, withConfiguration: probe) else {
+            return Image(systemName: name)
+        }
+        let size = base.size
+        let target = area * (weight[name] ?? 1)
+        let scale = min(sqrt(target / (size.width * size.height)), box.width / size.width, box.height / size.height)
+        let config = UIImage.SymbolConfiguration(pointSize: 20 * scale, weight: .semibold)
+        let symbol = UIImage(systemName: name, withConfiguration: config) ?? base
+        let drawn = UIGraphicsImageRenderer(size: box).image { _ in
+            let s = symbol.size
+            symbol.draw(in: CGRect(x: (box.width - s.width) / 2, y: (box.height - s.height) / 2,
+                                   width: s.width, height: s.height))
+        }
+        return Image(uiImage: drawn.withRenderingMode(.alwaysTemplate))
+    }
+}
+
+/// Three tabs, Pool, Spa and Lights, behind a glass tab bar.
 struct DashboardView: View {
+    @AppStorage("tab") private var tab: PoolTab = .pool
     @Environment(PoolStore.self) private var store
-    @State private var heatTarget: BodyType?
+    /// Lives here, above the tabs, so a tab rebuilding can't tear down the open sheet.
     @State private var showSettings = false
+
+    /// The Lights tab shows a glowing bulb while any light is on.
+    private func icon(for which: PoolTab) -> String {
+        which == .lights && store.lights.contains(where: store.isOn) ? "lightbulb.max.fill" : which.icon
+    }
+
+    var body: some View {
+        TabView(selection: $tab) {
+            ForEach(PoolTab.allCases) { which in
+                TabScreen(tab: which, onSettings: { showSettings = true })
+                    .tabItem { TabIcon.image(icon(for: which)).accessibilityLabel(which.title) }
+                    .tag(which)
+            }
+        }
+        .sheet(isPresented: $showSettings) { SettingsView() }
+    }
+}
+
+/// One tab: gradient background, title, status, then the tab's controls.
+private struct TabScreen: View {
+    let tab: PoolTab
+    var onSettings: () -> Void = {}
+    @Environment(PoolStore.self) private var store
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 28) {
-                    StatusStrip()
-
+                VStack(alignment: .leading, spacing: 20) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        header
+                        StatusStrip()
+                    }
                     if store.hasData {
-                        HStack(spacing: 12) {
-                            ForEach(store.bodies) { which in
-                                BodyTile(which: which) { heatTarget = which }
-                            }
-                        }
-
-                        if !store.features.isEmpty {
-                            SectionHeader(title: "Features")
-                            FeatureGrid(circuits: store.features)
-                        }
-
-                        if !store.lights.isEmpty {
-                            SectionHeader(title: "Lights")
-                            LightsSection()
+                        switch tab {
+                        case .pool: BodyControls(which: .pool)
+                        case .spa: BodyControls(which: .spa)
+                        case .lights: LightsControls()
                         }
                     } else {
                         ConnectingPlaceholder()
                     }
                 }
                 .padding(.horizontal, 16)
-                .padding(.bottom, 32)
+                .padding(.bottom, 24)
             }
-            .background(Color(.systemGroupedBackground))
+            .scrollBounceBehavior(.basedOnSize)
+            .background { Palette.background(warm: isWarm).ignoresSafeArea() }
+            .animation(.easeInOut(duration: 0.6), value: isWarm)
             .refreshable { await store.refresh() }
-            .navigationTitle(store.login?.shortName ?? "Pool")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { showSettings = true } label: { Image(systemName: "gearshape") }
+            .toolbar(.hidden, for: .navigationBar)
+        }
+    }
+
+    /// Pool and spa glow warm only while their heater is actually running. Lights stays blue.
+    private var isWarm: Bool {
+        switch tab {
+        case .pool: return store.bodyState(.pool).isHeating
+        case .spa: return store.bodyState(.spa).isHeating
+        case .lights: return false
+        }
+    }
+
+    /// Title on the left, schedule and settings in one glass capsule on the right.
+    private var header: some View {
+        HStack(alignment: .center) {
+            Text(tab.title)
+                .font(.largeTitle.bold())
+                .accessibilityAddTraits(.isHeader)
+            Spacer()
+            HStack(spacing: 0) {
+                NavigationLink {
+                    ScheduleView()
+                } label: {
+                    Image(systemName: "calendar.badge.clock")
+                        .frame(width: 48, height: 44)
+                }
+                .disabled(!store.hasData)
+                .accessibilityLabel("Schedule")
+                Button(action: onSettings) {
+                    Image(systemName: "gearshape")
+                        .frame(width: 48, height: 44)
+                }
+                .accessibilityLabel("Settings")
+            }
+            .font(.title3)
+            .foregroundStyle(.primary)
+            .buttonStyle(.plain)
+            .padding(.horizontal, 4)
+            .glassTile(cornerRadius: 22)
+        }
+        .padding(.top, 8)
+    }
+}
+
+/// Pool or spa: the temperature dial, then the body's switches.
+private struct BodyControls: View {
+    let which: BodyType
+    @Environment(PoolStore.self) private var store
+
+
+    /// Pool gets the spillway and high speed; the spa gets the air blower.
+    private var extras: [Circuit] {
+        which == .pool
+            ? [store.spillway, store.poolHigh].compactMap { $0 }
+            : [store.airBlower].compactMap { $0 }
+    }
+
+    var body: some View {
+        let reading = store.bodyState(which)
+        let heatOn = reading.mode != .off
+        let heating = reading.isHeating
+        let tint = heating ? Palette.warm : Palette.blue
+
+        VStack(spacing: 20) {
+            TempDial(range: store.setPointRange(which), target: reading.setPoint,
+                     water: reading.temperature, isHeating: reading.isHeating, heatOn: heatOn,
+                     colors: heating ? Palette.warmDial : Palette.coolDial) { value in
+                Task { await store.setSetPoint(which, value) }
+            }
+            .frame(maxWidth: 340)
+            .frame(maxWidth: .infinity)
+            .padding(.top, 4)
+            .padding(.bottom, -36) // tuck the buttons into the gap under the dial
+
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)],
+                      spacing: 12) {
+                if let circuit = store.circuit(for: which) {
+                    ControlButton(title: which.name, systemImage: Theme.icon(for: which),
+                                  isOn: store.isOn(circuit), detail: store.isOn(circuit) ? "Running" : "Off",
+                                  tint: tint, isBusy: store.busy.contains(circuit.id)) {
+                        Task { await store.toggle(circuit) }
+                    }
+                }
+                ControlButton(title: "Heater", systemImage: "flame.fill", isOn: heatOn,
+                              detail: heatOn ? (heating ? "Heating" : "On · ready") : "Off",
+                              tint: heating ? Palette.warm : Palette.blue) {
+                    Task { await store.setHeatMode(which, heatOn ? .off : .heater) }
+                }
+                ForEach(extras) { circuit in
+                    ControlButton(title: circuit.name, systemImage: Theme.icon(for: circuit),
+                                  isOn: store.isOn(circuit), tint: tint,
+                                  isBusy: store.busy.contains(circuit.id)) {
+                        Task { await store.toggle(circuit) }
+                    }
                 }
             }
-            .sheet(item: $heatTarget) { which in
-                HeatSheet(which: which)
-                    .presentationDetents([.medium, .large])
-            }
-            .sheet(isPresented: $showSettings) { SettingsView() }
         }
     }
 }
 
-private struct SectionHeader: View {
-    let title: String
+/// Lights tab: each light, then the fire pit, in one 2x2 grid.
+private struct LightsControls: View {
+    @Environment(PoolStore.self) private var store
+    @State private var colorFor: Circuit?
+
     var body: some View {
-        Text(title)
-            .font(.title3.weight(.semibold))
-            .padding(.bottom, -14)
+        VStack(alignment: .leading, spacing: 0) {
+        LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)],
+                  spacing: 12) {
+            ForEach(store.lights) { light in
+                let canColor = store.isColorLight(light)
+                ControlButton(title: light.name, systemImage: store.isOn(light) ? "lightbulb.max.fill" : "lightbulb",
+                              isOn: store.isOn(light), tint: Palette.blue,
+                              swatch: canColor ? store.lightColor(light) : nil,
+                              showsSwatch: canColor,
+                              isBusy: store.busy.contains(light.id),
+                              onLongPress: canColor ? { colorFor = light } : nil) {
+                    Task { await store.toggle(light) }
+                }
+            }
+            if let firePit = store.firePit {
+                ControlButton(title: firePit.name, systemImage: "flame.fill", isOn: store.isOn(firePit),
+                              tint: Palette.fire, isBusy: store.busy.contains(firePit.id)) {
+                    Task { await store.toggle(firePit) }
+                }
+            }
+        }
+        }
+        .sheet(item: $colorFor) { light in
+            LightColorCard(light: light)
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
+        }
+    }
+}
+
+/// Color choices for a color light. The controller sets every color light at once.
+private struct LightColorCard: View {
+    let light: Circuit
+    @Environment(PoolStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+
+    private let solids: [LightScene] = [.white, .blue, .green, .red, .purple]
+    private let shows: [LightScene] = [.party, .romance, .caribbean, .american, .sunset, .royal]
+    private let columns = [GridItem(.adaptive(minimum: 72), spacing: 12)]
+
+    var body: some View {
+        let others = store.config.circuits.filter { store.isColorLight($0) && $0.id != light.id }.map(\.name)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("\(light.name) color").font(.title2.bold())
+                    if !others.isEmpty {
+                        Text("Your controller changes all color lights together, so \(others.joined(separator: " and ")) will match.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                section("Colors", solids)
+                section("Shows", shows)
+            }
+            .padding(20)
+        }
+    }
+
+    private func section(_ title: String, _ scenes: [LightScene]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title).font(.headline).foregroundStyle(.secondary)
+            LazyVGrid(columns: columns, spacing: 14) {
+                ForEach(scenes) { scene in
+                    let selected = store.lightColor(light) == scene
+                    Button {
+                        Task { await store.setLightColor(scene) }
+                        dismiss()
+                    } label: {
+                        VStack(spacing: 6) {
+                            LightSwatch(scene: scene, size: 44)
+                                .overlay {
+                                    Circle().stroke(Color.primary, lineWidth: selected ? 3 : 0).padding(-5)
+                                }
+                            Text(scene.name)
+                                .font(.caption)
+                                .foregroundStyle(.primary)
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(selected ? .isSelected : [])
+                }
+            }
+        }
+    }
+}
+
+/// A round color chip. Shows are drawn as a ring of their colors.
+struct LightSwatch: View {
+    let scene: LightScene
+    var size: CGFloat = 16
+
+    var body: some View {
+        Group {
+            if let ring = Theme.showColors(for: scene) {
+                Circle().fill(AngularGradient(colors: ring + [ring[0]], center: .center))
+            } else {
+                Circle().fill(Theme.color(for: scene))
+            }
+        }
+        .frame(width: size, height: size)
+        .overlay(Circle().stroke(Color.primary.opacity(0.25), lineWidth: 1))
     }
 }
 
@@ -74,7 +363,7 @@ struct StatusStrip: View {
                     Text("Air \(store.state.airTemperature)°")
                 }
                 if store.state.freezeMode {
-                    Label("Freeze", systemImage: "snowflake").foregroundStyle(.blue)
+                    Label("Freeze", systemImage: "snowflake").foregroundStyle(.cyan)
                 }
             }
             .font(.subheadline)
@@ -89,7 +378,7 @@ struct StatusStrip: View {
                         .controlSize(.small)
                 }
                 .padding(12)
-                .background(Color.red.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+                .background(Color.red.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
             }
             if let notice = store.notice {
                 Text(notice)
@@ -110,14 +399,10 @@ struct StatusStrip: View {
 
     private var statusText: String {
         switch store.phase {
-        case .connected:
-            return store.link?.label ?? "Connected"
-        case .connecting(let step):
-            return step
-        case .failed:
-            return "Offline"
-        case .idle:
-            return "Paused"
+        case .connected: return store.link?.label ?? "Connected"
+        case .connecting(let step): return step
+        case .failed: return "Offline"
+        case .idle: return "Paused"
         }
     }
 }
@@ -136,155 +421,28 @@ private struct ConnectingPlaceholder: View {
             }
         }
         .foregroundStyle(.secondary)
-        .frame(maxWidth: .infinity, minHeight: 240)
+        .frame(maxWidth: .infinity, minHeight: 300)
     }
 }
 
-/// Pool or spa: big water temp, heating flame, tap for heat controls.
-struct BodyTile: View {
-    let which: BodyType
-    let onTap: () -> Void
-    @Environment(PoolStore.self) private var store
+#if DEBUG
+#Preview("Light") {
+    DashboardView().environment(PoolStore.preview)
+}
 
+#Preview("Dark") {
+    DashboardView().environment(PoolStore.preview).preferredColorScheme(.dark)
+}
+
+#Preview("Lights") {
+    TabScreenPreview(tab: .lights)
+}
+
+private struct TabScreenPreview: View {
+    let tab: PoolTab
     var body: some View {
-        let reading = store.bodyState(which)
-        let on = store.isBodyOn(which)
-
-        Button(action: onTap) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Image(systemName: Theme.icon(for: which))
-                    Text(which.name).font(.headline)
-                    Spacer()
-                    if reading.isHeating {
-                        Image(systemName: "flame.fill").symbolEffect(.pulse)
-                    }
-                }
-                Text("\(reading.temperature)°")
-                    .font(.system(size: 54, weight: .semibold, design: .rounded))
-                    .monospacedDigit()
-                    .opacity(on ? 1 : 0.55)
-                Text(caption(reading, on: on))
-                    .font(.footnote.weight(.medium))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                    .opacity(0.85)
-            }
-            .foregroundStyle(on ? Color.white : Color.primary)
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(on ? AnyShapeStyle(Theme.gradient(for: which)) : AnyShapeStyle(Theme.tile),
-                        in: RoundedRectangle(cornerRadius: Theme.corner, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(which.name), \(reading.temperature) degrees, \(on ? "on" : "off")")
-        .accessibilityHint("Opens heat controls")
-    }
-
-    private func caption(_ reading: BodyState, on: Bool) -> String {
-        let heat = reading.mode == .off ? "Heat off" : "Heat to \(reading.setPoint)°"
-        return on ? heat : "Off · \(heat.lowercased())"
+        TabScreen(tab: tab)
+            .environment(PoolStore.preview)
     }
 }
-
-/// Control Center style toggles for every auxiliary circuit.
-struct FeatureGrid: View {
-    let circuits: [Circuit]
-    @Environment(PoolStore.self) private var store
-    private let columns = [GridItem(.adaptive(minimum: 104), spacing: 12)]
-
-    var body: some View {
-        LazyVGrid(columns: columns, spacing: 12) {
-            ForEach(circuits) { circuit in
-                CircuitTile(circuit: circuit)
-            }
-        }
-    }
-}
-
-struct CircuitTile: View {
-    let circuit: Circuit
-    @Environment(PoolStore.self) private var store
-
-    var body: some View {
-        let on = store.isOn(circuit)
-        Button {
-            Task { await store.toggle(circuit) }
-        } label: {
-            VStack(alignment: .leading, spacing: 12) {
-                Image(systemName: Theme.icon(for: circuit))
-                    .font(.title3)
-                    .frame(width: 36, height: 36)
-                    .background(on ? Color.white.opacity(0.25) : Color.secondary.opacity(0.15), in: Circle())
-                Text(circuit.name)
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-                Text(on ? "On" : "Off")
-                    .font(.caption)
-                    .opacity(0.8)
-            }
-            .foregroundStyle(on ? Color.white : Color.primary)
-            .padding(14)
-            .frame(maxWidth: .infinity, minHeight: 116, alignment: .topLeading)
-            .background(on ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Theme.tile),
-                        in: RoundedRectangle(cornerRadius: Theme.corner, style: .continuous))
-            .overlay(alignment: .topTrailing) {
-                if store.busy.contains(circuit.id) {
-                    ProgressView().padding(10)
-                }
-            }
-        }
-        .buttonStyle(.plain)
-        .sensoryFeedback(.selection, trigger: on)
-        .accessibilityLabel(circuit.name)
-        .accessibilityValue(on ? "On" : "Off")
-    }
-}
-
-struct LightsSection: View {
-    @Environment(PoolStore.self) private var store
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 12) {
-                Button {
-                    Task { await store.sendLights(.on) }
-                } label: {
-                    Label("All on", systemImage: "lightbulb.fill").frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                Button {
-                    Task { await store.sendLights(.off) }
-                } label: {
-                    Label("All off", systemImage: "lightbulb.slash").frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-            }
-            .controlSize(.large)
-
-            if store.hasColorLights {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 10) {
-                        ForEach(LightScene.pickable) { scene in
-                            Button {
-                                Task { await store.sendLights(scene) }
-                            } label: {
-                                HStack(spacing: 6) {
-                                    Circle().fill(Theme.color(for: scene)).frame(width: 10, height: 10)
-                                    Text(scene.name).font(.subheadline.weight(.medium))
-                                }
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 9)
-                                .background(Theme.tile, in: Capsule())
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                }
-            }
-
-            FeatureGrid(circuits: store.lights)
-        }
-    }
-}
+#endif

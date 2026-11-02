@@ -15,6 +15,11 @@ enum SLCode {
     static let equipmentState: UInt16 = 12526
     static let setHeatMode: UInt16 = 12538
     static let lightCommand: UInt16 = 12556
+    static let scheduleChanged: UInt16 = 12501
+    static let getSchedules: UInt16 = 12542
+    static let addSchedule: UInt16 = 12544
+    static let deleteSchedule: UInt16 = 12546
+    static let setSchedule: UInt16 = 12548
     static let gatewayLookup: UInt16 = 18003
 }
 

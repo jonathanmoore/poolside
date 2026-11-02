@@ -48,7 +48,7 @@ The password check needs `pip install cryptography`.
 
 - `Poolside/Protocol`: ScreenLogic wire format, login, password encryption, discovery, Pentair's remote lookup.
 - `Poolside/Model`: sign-in storage (Keychain for the password) and the app state.
-- `Poolside/Views`: dashboard, heat sheet with the temperature wheel, sign-in, settings.
+- `Poolside/Views`: dashboard, heat sheet with the temperature wheel, schedule list and editor, sign-in, settings.
 - `tools`: the mock adapter and the read-only checker.
 
 ## What's been checked
@@ -58,6 +58,7 @@ The password check needs `pip install cryptography`.
 - Tried read-only against a real adapter: the checker logged in on home WiFi with no password and read config and status. Over Pentair's remote server, the checker and the app's Swift protocol code both logged in and decoded the same values.
 - Discovery found the real adapter on WiFi. Only the subnet broadcast got an answer; the 255.255.255.255 broadcast didn't.
 - No commands (circuits, heat, lights) have been sent to real equipment yet.
+- Schedules: the app's Swift code reads the real adapter's 7 schedules correctly. Add, edit and delete pass against the mock adapter only; none has been sent to the real controller yet.
 
 ## Credits
 

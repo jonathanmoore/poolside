@@ -163,7 +163,7 @@ final class SLConnection: @unchecked Sendable {
             let error: SLError = message.messageId == SLCode.loginFailure
                 ? .loginFailed : .rejected(message.messageId)
             pending.removeFirst().continuation.resume(throwing: error)
-        case SLCode.statusChanged:
+        case SLCode.statusChanged, SLCode.scheduleChanged:
             onPush?(message)
         default:
             break
@@ -272,6 +272,46 @@ final class ScreenLogicClient: @unchecked Sendable {
         w.int32(0)
         w.int32(scene.rawValue)
         _ = try await connection.request(SLCode.lightCommand, w.data)
+    }
+
+    // MARK: Schedules
+
+    func schedules(_ kind: ScheduleKind) async throws -> [Schedule] {
+        var w = ByteWriter()
+        w.int32(0)
+        w.int32(kind.rawValue)
+        let reply = try await connection.request(SLCode.getSchedules, w.data)
+        return try Schedule.decodeList(reply, kind: kind)
+    }
+
+    /// Makes an empty schedule slot and returns its raw id. Fill it with `setSchedule`.
+    func addSchedule(_ kind: ScheduleKind) async throws -> Int {
+        var w = ByteWriter()
+        w.int32(0)
+        w.int32(kind.rawValue)
+        var r = try await connection.request(SLCode.addSchedule, w.data).reader
+        return try r.int32()
+    }
+
+    func setSchedule(_ s: Schedule) async throws {
+        var w = ByteWriter()
+        w.int32(0)
+        w.int32(s.id)
+        w.int32(s.circuitId)
+        w.int32(s.startMinutes)
+        w.int32(s.stopMinutes)
+        w.int32(s.days.rawValue)
+        w.int32(s.flags)
+        w.int32(s.heatCommand)
+        w.int32(s.heatSetPoint)
+        _ = try await connection.request(SLCode.setSchedule, w.data)
+    }
+
+    func deleteSchedule(id: Int) async throws {
+        var w = ByteWriter()
+        w.int32(0)
+        w.int32(id)
+        _ = try await connection.request(SLCode.deleteSchedule, w.data)
     }
 
     func ping() async throws {

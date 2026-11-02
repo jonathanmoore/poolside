@@ -25,6 +25,10 @@ final class PoolStore {
     var lastUpdate: Date?
     var busy: Set<Int> = []
     var notice: String?
+    /// Last color picked per light id. The controller doesn't report it, so the app remembers.
+    var lightColors: [Int: LightScene] = PoolStore.loadLightColors()
+    var schedules: [Schedule] = []
+    var schedulesLoaded = false
 
     @ObservationIgnored private var client: ScreenLogicClient?
     @ObservationIgnored private var pollTask: Task<Void, Never>?
@@ -51,6 +55,8 @@ final class PoolStore {
         hasData = false
         config = ControllerConfig()
         state = EquipmentState()
+        schedules = []
+        schedulesLoaded = false
         phase = .idle
     }
 
@@ -223,8 +229,47 @@ final class PoolStore {
         }
     }
 
+    private func named(_ words: String...) -> Circuit? {
+        config.circuits.first { c in
+            let name = c.name.lowercased()
+            return words.contains { name.contains($0) }
+        }
+    }
+
+    var spillway: Circuit? {
+        config.circuits.first { $0.function == .spillway } ?? named("spill")
+    }
+    var poolHigh: Circuit? { named("pool high", "high speed") }
+    var airBlower: Circuit? { named("blower") }
+    var firePit: Circuit? { named("fire") }
+
     var lights: [Circuit] {
         config.circuits.filter { $0.isLight && $0.interface != .hidden && $0.interface != .invalid }
+    }
+
+    func isColorLight(_ c: Circuit) -> Bool {
+        [.intelliBrite, .magicStream, .samLight, .salLight, .colorWheel, .photonGen].contains(c.function)
+    }
+
+    func lightColor(_ c: Circuit) -> LightScene? { lightColors[c.id] }
+
+    /// Sends a color or show. The controller applies it to every color light, so all of them remember it.
+    func setLightColor(_ scene: LightScene) async {
+        for light in config.circuits where isColorLight(light) {
+            lightColors[light.id] = scene
+        }
+        UserDefaults.standard.set(Dictionary(uniqueKeysWithValues: lightColors.map { (String($0.key), $0.value.rawValue) }),
+                                  forKey: "lightColors")
+        await sendLights(scene)
+    }
+
+    private static func loadLightColors() -> [Int: LightScene] {
+        let raw = UserDefaults.standard.dictionary(forKey: "lightColors") as? [String: Int] ?? [:]
+        var out: [Int: LightScene] = [:]
+        for (key, value) in raw {
+            if let id = Int(key), let scene = LightScene(rawValue: value) { out[id] = scene }
+        }
+        return out
     }
 
     var hasColorLights: Bool {
@@ -276,6 +321,63 @@ final class PoolStore {
     func sendLights(_ scene: LightScene) async {
         guard let client else { return }
         await run { try await client.sendLights(scene) }
+    }
+
+    // MARK: - Schedules
+
+    /// Circuits a schedule can switch: everything the official app would show.
+    var schedulableCircuits: [Circuit] {
+        config.circuits.filter { $0.interface != .hidden && $0.interface != .invalid }
+    }
+
+    func circuitName(_ id: Int) -> String {
+        config.circuits.first { $0.id == id }?.name ?? "Circuit \(id)"
+    }
+
+    func loadSchedules() async {
+        guard let client else { return }
+        do {
+            let recurring = try await client.schedules(.recurring)
+            let once = try await client.schedules(.runOnce)
+            schedules = (recurring + once).sorted {
+                ($0.startMinutes, circuitName($0.circuitId)) < ($1.startMinutes, circuitName($1.circuitId))
+            }
+            schedulesLoaded = true
+            notice = nil
+        } catch {
+            notice = error.localizedDescription
+        }
+    }
+
+    /// Saves an edit, or adds the schedule when `isNew`. Throws so the editor can stay open on failure.
+    func saveSchedule(_ schedule: Schedule, isNew: Bool) async throws {
+        guard let client else { throw SLError.closed }
+        var toSave = schedule
+        if isNew {
+            toSave.id = try await client.addSchedule(schedule.kind)
+            do {
+                try await client.setSchedule(toSave)
+            } catch {
+                // Don't leave an empty slot behind on the controller.
+                try? await client.deleteSchedule(id: toSave.id)
+                throw error
+            }
+        } else {
+            try await client.setSchedule(toSave)
+        }
+        await loadSchedules()
+    }
+
+    func deleteSchedule(_ schedule: Schedule) async {
+        guard let client else { return }
+        schedules.removeAll { $0.id == schedule.id }
+        do {
+            try await client.deleteSchedule(id: schedule.id)
+            notice = nil
+        } catch {
+            notice = error.localizedDescription
+        }
+        await loadSchedules()
     }
 
     private func run(_ command: @escaping () async throws -> Void) async {

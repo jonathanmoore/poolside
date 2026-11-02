@@ -23,6 +23,7 @@ ScreenLogic protocol, as reverse-engineered by node-screenlogic (MIT) and screen
 - Every message: 8-byte header (uint16 sender, uint16 message id, uint32 length), little-endian payload, strings padded to 4 bytes.
 - Reads: controller config (12532) for names, circuit types and setpoint limits; equipment state (12526) for temps, heat and circuit states. Polled every few seconds while the app is open.
 - Writes: circuit on/off (12530), setpoint (12528), heat mode (12538), light command (12556).
+- Schedules: read (12542, recurring and run-once), add an empty slot (12544), fill or change it (12548), delete (12546). Schedule ids are 700 and up and circuit ids are the config's raw ids, sent back as-is. Days are a bitmask, bit 0 Monday to bit 6 Sunday. On and off one minute apart (8:00 to 7:59) means all day.
 
 ## iOS specifics
 
@@ -44,4 +45,5 @@ Original, not a copy of the Android build. Native SwiftUI, light and dark.
 - Siri and Shortcuts ("turn on the spa") via App Intents.
 - Home Screen widget with water temps.
 - Push updates (add client, msg 12522) instead of polling.
-- Schedules, chemistry and pump readouts.
+- Chemistry and pump readouts.
+- Heat settings inside schedules (the controller stores a heat command and setpoint per schedule; the app keeps whatever is there).
