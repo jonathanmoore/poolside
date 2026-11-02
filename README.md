@@ -19,7 +19,7 @@ Screenshots from the simulator in demo mode (sample data, see below).
 <img src="docs/screens/signin-light.png" width="200" alt="Sign in">
 </p>
 
-- **Pool and Spa** each have a dial for the heat target. Drag the knob; the big number is what you're setting and the chip under it is the water now. A small marker on the ring shows the current temperature. Below are on/off switches: pool, heater, spillway and pool high; or spa, heater and air blower.
+- **Pool and Spa** each have a dial for the heat target. Drag the knob; the big number is what you're setting and the chip under it is the water now. A small marker on the ring shows the current temperature. Below are on/off switches: pool, heater, spillway, fountains and pool high; or spa, heater and air blower.
 - **Colors** stay blue. A tab turns warm only while its heater is actually firing, not just switched on.
 - **Lights** is a 2x2 grid with the fire pit. Long-press a color light to pick a color or show. The controller sets every color light at once.
 - **Schedule** (calendar button, top right) lists the controller's schedules. Tap to edit, + to add, swipe to delete.

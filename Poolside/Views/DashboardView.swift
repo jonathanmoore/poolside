@@ -192,10 +192,10 @@ private struct BodyControls: View {
     @Environment(PoolStore.self) private var store
 
 
-    /// Pool gets the spillway and high speed; the spa gets the air blower.
+    /// Pool gets the spillway, fountains and high speed; the spa gets the air blower.
     private var extras: [Circuit] {
         which == .pool
-            ? [store.spillway, store.poolHigh].compactMap { $0 }
+            ? [store.spillway, store.fountains, store.poolHigh].compactMap { $0 }
             : [store.airBlower].compactMap { $0 }
     }
 

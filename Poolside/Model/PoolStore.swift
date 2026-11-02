@@ -243,6 +243,7 @@ final class PoolStore {
     }
     var poolHigh: Circuit? { named("pool high", "high speed") }
     var airBlower: Circuit? { named("blower") }
+    var fountains: Circuit? { named("fountain", "water feature") }
     var firePit: Circuit? { named("fire") }
 
     var lights: [Circuit] {
