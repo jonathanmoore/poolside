@@ -15,7 +15,7 @@ enum Theme {
     }
 
     static func icon(for body: BodyType) -> String {
-        body == .pool ? "figure.pool.swim" : "bathtub.fill"
+        body == .pool ? "figure.pool.swim" : "water.waves"
     }
 
     /// Best-guess symbol from what the circuit is called and what it does.
@@ -40,6 +40,19 @@ enum Theme {
         return "power"
     }
 
+    /// The colors a light show cycles through, or nil for a solid color.
+    static func showColors(for scene: LightScene) -> [Color]? {
+        switch scene {
+        case .party: return [.pink, .yellow, .cyan, .purple]
+        case .romance: return [.red, .pink, Color(red: 0.6, green: 0.1, blue: 0.3)]
+        case .caribbean: return [.teal, .cyan, .green, .blue]
+        case .american: return [.red, .white, .blue]
+        case .sunset: return [.orange, .red, .purple]
+        case .royal: return [.purple, .blue, .indigo]
+        default: return nil
+        }
+    }
+
     static func color(for scene: LightScene) -> Color {
         switch scene {
         case .party: return .pink
@@ -51,7 +64,7 @@ enum Theme {
         case .blue: return .blue
         case .green: return .green
         case .red: return .red
-        case .white: return .gray
+        case .white: return .white
         case .purple: return .purple
         default: return .accentColor
         }

@@ -6,7 +6,7 @@ Run it on your Mac, then in the app pick Home WiFi and type the Mac's IP and por
     python3 tools/mock_gateway.py --port 8080
 
 It answers discovery on UDP 1444, the TCP login handshake, config and status reads,
-and the circuit, heat and light commands. State lives in memory only.
+the circuit, heat and light commands, and schedules (read, add, edit, delete). State lives in memory only.
 If the `cryptography` package is installed and --password is set, it checks the
 encrypted password like a real adapter does for remote logins.
 """
@@ -33,6 +33,12 @@ state = {
         504: ["Pool Light", 16, 4, False],
         506: ["Spa Light", 16, 4, False],
         507: ["Pool High", 0, 2, False],
+    },
+    # raw schedule id: [kind (0 recurring, 1 run once), circuit, start, stop, day mask, flags, heat cmd, heat set]
+    "schedules": {
+        700: [0, 505, 480, 479, 0x7F, 0, 4, 70],
+        701: [0, 503, 540, 555, 0x7F, 0, 4, 70],
+        702: [0, 504, 1200, 1320, 0x7F, 0, 4, 70],
     },
 }
 lock = threading.Lock()
@@ -135,6 +141,30 @@ def handle(code, body):
                     if c[1] == 16:
                         c[3] = bool(command)
             return msg(12557)
+        if code == 12542:
+            _, kind = struct.unpack_from("<ii", body)
+            rows = [(sid, e) for sid, e in sorted(state["schedules"].items()) if e[0] == kind]
+            p = struct.pack("<i", len(rows))
+            for sid, e in rows:
+                p += struct.pack("<iiiiiiii", sid, *e[1:])
+            return msg(12543, p)
+        if code == 12544:
+            _, kind = struct.unpack_from("<ii", body)
+            sid = max(state["schedules"], default=699) + 1
+            state["schedules"][sid] = [kind, 0, 0, 0, 0, 0, 4, 70]
+            return msg(12545, struct.pack("<i", sid))
+        if code == 12546:
+            _, sid = struct.unpack_from("<ii", body)
+            if state["schedules"].pop(sid, None) is None:
+                return msg(31)
+            return msg(12547)
+        if code == 12548:
+            _, sid, cid, start, stop, days, flags, heat_cmd, heat_set = struct.unpack_from("<9i", body)
+            if sid not in state["schedules"] or cid not in state["circuits"]:
+                return msg(31)
+            kind = state["schedules"][sid][0]
+            state["schedules"][sid] = [kind, cid, start, stop, days, flags, heat_cmd, heat_set]
+            return msg(12549)
         return msg(30)
 
 

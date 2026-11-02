@@ -162,6 +162,29 @@ def read_state(conn):
     return {"air": air, "freeze": freeze, "bodies": bodies, "circuits": circuits}
 
 
+DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+
+def read_schedules(conn, kind):
+    """kind 0 = recurring, 1 = run once. Read-only (message 12542)."""
+    w = Writer()
+    w.int32(0)
+    w.int32(kind)
+    _, body = conn.request(12542, w.data)
+    r = Reader(body)
+    events = []
+    for _ in range(r.int32()):
+        sid, cid, start, stop, days, flags, heat_cmd, heat_set = (r.int32() for _ in range(8))
+        events.append(dict(id=sid - 699, circuit=cid, start=start, stop=stop, days=days,
+                           flags=flags, heat_cmd=heat_cmd, heat_set=heat_set))
+    return events
+
+
+def hhmm(minutes):
+    h, m = divmod(minutes, 60)
+    return f"{(h % 12) or 12}:{m:02d} {'AM' if h < 12 else 'PM'}"
+
+
 def discover(timeout=3.0):
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
@@ -200,6 +223,7 @@ def main():
     p.add_argument("--port", type=int, default=80)
     p.add_argument("--remote", metavar="SYSTEM_NAME")
     p.add_argument("--password")
+    p.add_argument("--schedules", action="store_true", help="also print the schedules")
     a = p.parse_args()
 
     if a.discover:
@@ -227,6 +251,15 @@ def main():
         print(f"{'pool' if t == 0 else 'spa'}: {b['temp']}°, set {b['set']}° ({lo}-{hi}), mode {b['mode']}, heating {b['heat_status']}")
     for cid, name, func, iface in cfg["circuits"]:
         print(f"  {cid} {name:<18} function {func:>2} tab {iface}  {'ON' if st['circuits'].get(cid) else 'off'}")
+    if a.schedules:
+        names = {cid: name for cid, name, _, _ in cfg["circuits"]}
+        for kind, label in ((0, "Recurring schedules"), (1, "Run-once schedules")):
+            events = read_schedules(conn, kind)
+            print(f"\n{label}: {len(events)}")
+            for e in events:
+                days = ", ".join(d for i, d in enumerate(DAYS) if e["days"] >> i & 1) or "none"
+                print(f"  #{e['id']} {names.get(e['circuit'], e['circuit'])}: {hhmm(e['start'])} to {hhmm(e['stop'])}, {days}"
+                      f"  (flags {e['flags']}, heat cmd {e['heat_cmd']}, set {e['heat_set']})")
 
 
 if __name__ == "__main__":

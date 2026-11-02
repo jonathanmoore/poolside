@@ -45,11 +45,12 @@ struct SettingsView: View {
 
                 Section("Remote password") {
                     SecureField("Remote password", text: $password)
-                    Button("Update password") {
-                        LoginStore.setPassword(password)
-                        Task { await store.connect() }
-                    }
-                    .disabled(password.isEmpty)
+                        .textContentType(.password)
+                        .submitLabel(.done)
+                        .onSubmit(savePassword)
+                    // Always enabled on purpose: flipping it from disabled to enabled on the first
+                    // keystroke redraws this section and knocks the keyboard out of the field.
+                    Button("Update password", action: savePassword)
                 }
 
                 Section {
@@ -82,5 +83,12 @@ struct SettingsView: View {
             host = store.login?.localHost ?? ""
             port = String(store.login?.localPort ?? 80)
         }
+    }
+
+    private func savePassword() {
+        guard !password.isEmpty else { return }
+        LoginStore.setPassword(password)
+        password = ""
+        Task { await store.connect() }
     }
 }

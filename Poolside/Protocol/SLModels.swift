@@ -65,7 +65,9 @@ struct BodyState: Equatable {
     var setPoint = 0
     var heatMode = 0
 
-    var isHeating: Bool { heatStatus != 0 }
+    /// The heater is switched on and the controller says it's firing right now.
+    /// (Heat on with the water already at target is "ready", not heating.)
+    var isHeating: Bool { heatMode != 0 && heatStatus != 0 }
     var mode: HeatMode { HeatMode(rawValue: heatMode) ?? .off }
 }
 
@@ -142,5 +144,83 @@ struct RemoteGateway {
         let relayOn = try r.uint8() != 0
         return RemoteGateway(found: found, licenseOK: license, host: host, port: port,
                              portOpen: portOpen, relayOn: relayOn)
+    }
+}
+
+enum ScheduleKind: Int {
+    case recurring = 0
+    case runOnce = 1
+}
+
+/// Days a schedule runs. Bit 0 is Monday through bit 6, Sunday.
+struct Weekdays: OptionSet, Hashable {
+    let rawValue: Int
+
+    static let monday = Weekdays(rawValue: 1 << 0)
+    static let tuesday = Weekdays(rawValue: 1 << 1)
+    static let wednesday = Weekdays(rawValue: 1 << 2)
+    static let thursday = Weekdays(rawValue: 1 << 3)
+    static let friday = Weekdays(rawValue: 1 << 4)
+    static let saturday = Weekdays(rawValue: 1 << 5)
+    static let sunday = Weekdays(rawValue: 1 << 6)
+
+    static let weekdays: Weekdays = [.monday, .tuesday, .wednesday, .thursday, .friday]
+    static let weekend: Weekdays = [.saturday, .sunday]
+    static let everyDay: Weekdays = [.weekdays, .weekend]
+
+    /// Sunday first, the way US calendars lay out a week.
+    static let ordered: [(day: Weekdays, short: String, letter: String)] = [
+        (.sunday, "Sun", "S"), (.monday, "Mon", "M"), (.tuesday, "Tue", "T"),
+        (.wednesday, "Wed", "W"), (.thursday, "Thu", "T"), (.friday, "Fri", "F"),
+        (.saturday, "Sat", "S"),
+    ]
+
+    var summary: String {
+        let days = intersection(.everyDay)
+        if days == .everyDay { return "Every day" }
+        if days == .weekdays { return "Weekdays" }
+        if days == .weekend { return "Weekends" }
+        if days.isEmpty { return "No days" }
+        return Weekdays.ordered.filter { days.contains($0.day) }.map(\.short).joined(separator: ", ")
+    }
+}
+
+/// One controller schedule: turn a circuit on at `startMinutes` and off at `stopMinutes`.
+struct Schedule: Identifiable, Equatable {
+    /// Raw schedule id as the controller sends it (700 and up). Sent back as-is.
+    var id: Int
+    var kind: ScheduleKind
+    /// Raw circuit id, same numbering as `Circuit.id`.
+    var circuitId: Int
+    /// Minutes past midnight.
+    var startMinutes: Int
+    var stopMinutes: Int
+    var days: Weekdays
+    // Not edited by the app yet; kept so an edit sends back what was there.
+    var flags = 0
+    var heatCommand = 4
+    var heatSetPoint = 70
+
+    /// Start and stop one minute apart wraps the clock: the controller's way to say "all day".
+    var isAllDay: Bool { (startMinutes + 1440 - 1) % 1440 == stopMinutes }
+
+    static func decodeList(_ msg: SLMessage, kind: ScheduleKind) throws -> [Schedule] {
+        var r = msg.reader
+        let count = try r.int32()
+        var list: [Schedule] = []
+        for _ in 0..<max(0, count) {
+            let id = try r.int32()
+            let circuit = try r.int32()
+            let start = try r.int32()
+            let stop = try r.int32()
+            let days = try r.int32()
+            let flags = try r.int32()
+            let heatCommand = try r.int32()
+            let heatSetPoint = try r.int32()
+            list.append(Schedule(id: id, kind: kind, circuitId: circuit, startMinutes: start,
+                                 stopMinutes: stop, days: Weekdays(rawValue: days), flags: flags,
+                                 heatCommand: heatCommand, heatSetPoint: heatSetPoint))
+        }
+        return list
     }
 }
