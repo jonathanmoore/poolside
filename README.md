@@ -54,8 +54,10 @@ The password check needs `pip install cryptography`.
 ## What's been checked
 
 - The mock adapter and the checker were run against node-screenlogic, the reference library: discovery, password encryption (matches its test vector), config, status and all four commands agree.
-- The Swift code mirrors the checker's byte layout but hasn't been compiled yet. This environment has no Xcode, so expect a small fix or two on the first build.
-- Not yet tried against a real adapter or Pentair's remote server.
+- The app builds cleanly in Xcode 26 for the iOS simulator.
+- Tried read-only against a real adapter: the checker logged in on home WiFi with no password and read config and status. Over Pentair's remote server, the checker and the app's Swift protocol code both logged in and decoded the same values.
+- Discovery found the real adapter on WiFi. Only the subnet broadcast got an answer; the 255.255.255.255 broadcast didn't.
+- No commands (circuits, heat, lights) have been sent to real equipment yet.
 
 ## Credits
 

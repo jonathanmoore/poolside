@@ -21,24 +21,32 @@ enum SLDiscovery {
 
         var yes: Int32 = 1
         setsockopt(fd, SOL_SOCKET, SO_BROADCAST, &yes, socklen_t(MemoryLayout<Int32>.size))
-        var wait = timeval(tv_sec: 0, tv_usec: 200_000)
-        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &wait, socklen_t(MemoryLayout<timeval>.size))
+        // Non-blocking: a send to an empty address can otherwise stall on ARP for seconds.
+        _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
 
+        let deadline = Date().addingTimeInterval(timeout)
         let probe: [UInt8] = [1, 0, 0, 0, 0, 0, 0, 0]
         var targets: [UInt32] = [0xFFFF_FFFF]
         if let subnet = wifiSubnet() {
             targets.append(subnet.broadcast)
             targets.append(contentsOf: subnet.hosts)
         }
-        for target in targets {
-            send(fd, probe, to: target)
+        // Spend at most half the timeout sending so replies have time to arrive.
+        let sendDeadline = Date().addingTimeInterval(timeout / 2)
+        for target in targets where Date() < sendDeadline {
+            while !send(fd, probe, to: target), Date() < sendDeadline {
+                var pfd = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
+                _ = poll(&pfd, 1, 20)
+            }
         }
 
         var found: [String: LocalGateway] = [:]
         let capacity = 512
         var buffer = [UInt8](repeating: 0, count: capacity)
-        let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
+            var pfd = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+            let remaining = Int32(max(deadline.timeIntervalSinceNow * 1000, 1))
+            guard poll(&pfd, 1, min(remaining, 200)) > 0 else { continue }
             var from = sockaddr_in()
             var fromLength = socklen_t(MemoryLayout<sockaddr_in>.size)
             let count = withUnsafeMutablePointer(to: &from) { pointer in
@@ -59,17 +67,20 @@ enum SLDiscovery {
         return Array(found.values).sorted { $0.host < $1.host }
     }
 
-    private static func send(_ fd: Int32, _ bytes: [UInt8], to address: UInt32) {
+    /// False only when the socket buffer is full and the send is worth retrying.
+    /// Other errors (no route, host down) mean that address is skipped.
+    private static func send(_ fd: Int32, _ bytes: [UInt8], to address: UInt32) -> Bool {
         var target = sockaddr_in()
         target.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
         target.sin_family = sa_family_t(AF_INET)
         target.sin_port = port.bigEndian
         target.sin_addr = in_addr(s_addr: address.bigEndian)
-        _ = withUnsafePointer(to: &target) { pointer in
+        let sent = withUnsafePointer(to: &target) { pointer in
             pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
                 sendto(fd, bytes, bytes.count, 0, sockaddrPointer, socklen_t(MemoryLayout<sockaddr_in>.size))
             }
         }
+        return sent >= 0 || (errno != EAGAIN && errno != ENOBUFS)
     }
 
     /// Broadcast address and host addresses (host byte order) of the WiFi interface.
