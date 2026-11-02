@@ -4,16 +4,28 @@ A personal iOS app for a Pentair ScreenLogic pool system. Works on home WiFi and
 
 ## Design
 
-These are mockups drawn from the SwiftUI layout, not screenshots from a phone. Real screenshots come once it's built and running.
+Screenshots from the simulator in demo mode (sample data, see below).
 
 <p>
-<img src="docs/screens/home-dark.png" width="200" alt="Home screen, dark">
-<img src="docs/screens/home-light.png" width="200" alt="Home screen, light">
-<img src="docs/screens/heat-dark.png" width="200" alt="Heat sheet">
-<img src="docs/screens/signin-dark.png" width="200" alt="Sign in">
+<img src="docs/screens/pool-light.png" width="200" alt="Pool tab">
+<img src="docs/screens/spa-light.png" width="200" alt="Spa tab, heater running">
+<img src="docs/screens/lights-light.png" width="200" alt="Lights tab">
+<img src="docs/screens/schedule-light.png" width="200" alt="Schedule">
+</p>
+<p>
+<img src="docs/screens/pool-dark.png" width="200" alt="Pool tab, dark">
+<img src="docs/screens/spa-dark.png" width="200" alt="Spa tab, dark">
+<img src="docs/screens/lights-dark.png" width="200" alt="Lights tab, dark">
+<img src="docs/screens/signin-light.png" width="200" alt="Sign in">
 </p>
 
-Home shows pool and spa as big tiles with the water temp, then features and lights. Tap a body for the heat sheet: on or off, heat mode and target temp. Sign in takes the system name, and the remote password only matters away from home.
+- **Pool and Spa** each have a dial for the heat target. Drag the knob; the big number is what you're setting and the chip under it is the water now. A small marker on the ring shows the current temperature. Below are on/off switches: pool, heater, spillway and pool high; or spa, heater and air blower.
+- **Colors** stay blue. A tab turns warm only while its heater is actually firing, not just switched on.
+- **Lights** is a 2x2 grid with the fire pit. Long-press a color light to pick a color or show. The controller sets every color light at once.
+- **Schedule** (calendar button, top right) lists the controller's schedules. Tap to edit, + to add, swipe to delete.
+- Follows the system light or dark setting. The tab bar is icons only.
+
+<img src="docs/icon.png" width="96" alt="App icon"> The icon is drawn by `tools/app_icon.swift` (light, dark and tinted).
 
 ## Run it on your phone
 
@@ -42,14 +54,23 @@ python3 tools/protocol_check.py --host 192.168.1.50
 python3 tools/protocol_check.py --remote "Pentair: 12-34-56" --password 1234
 ```
 
-The password check needs `pip install cryptography`.
+The password check needs `pip install cryptography`. Add `--schedules` to also print the schedules.
+
+### Demo mode
+
+Debug builds accept launch arguments (Xcode: Product > Scheme > Edit Scheme > Arguments):
+
+- `-demo`: sample data, never connects to a pool. Used for the screenshots.
+- `-tab pool|spa|lights`: start on a tab.
+- `-openSchedule`: open the schedule screen.
+- `-demoSignIn`: with `-demo`, show the sign-in screen.
 
 ## Layout
 
 - `Poolside/Protocol`: ScreenLogic wire format, login, password encryption, discovery, Pentair's remote lookup.
 - `Poolside/Model`: sign-in storage (Keychain for the password) and the app state.
-- `Poolside/Views`: dashboard, heat sheet with the temperature wheel, schedule list and editor, sign-in, settings.
-- `tools`: the mock adapter and the read-only checker.
+- `Poolside/Views`: the three tabs, the temperature dial, glass switches, schedule list and editor, sign-in, settings.
+- `tools`: the mock adapter, the read-only checker and the app icon script.
 
 ## What's been checked
 
@@ -57,8 +78,9 @@ The password check needs `pip install cryptography`.
 - The app builds cleanly in Xcode 26 for the iOS simulator.
 - Tried read-only against a real adapter: the checker logged in on home WiFi with no password and read config and status. Over Pentair's remote server, the checker and the app's Swift protocol code both logged in and decoded the same values.
 - Discovery found the real adapter on WiFi. Only the subnet broadcast got an answer; the 255.255.255.255 broadcast didn't.
-- No commands (circuits, heat, lights) have been sent to real equipment yet.
-- Schedules: the app's Swift code reads the real adapter's 7 schedules correctly. Add, edit and delete pass against the mock adapter only; none has been sent to the real controller yet.
+- Commands from the app have reached the real controller: circuits and lights on and off, heat mode and the target temperature.
+- Schedules: the app's Swift code reads the real adapter's 7 schedules correctly. Add, edit and delete pass against the mock adapter; none has been sent to the real controller yet.
+- Light colors: the controller doesn't report the current color, so the app shows the last one picked in the app.
 
 ## Credits
 

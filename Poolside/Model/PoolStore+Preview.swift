@@ -5,6 +5,9 @@ extension PoolStore {
     /// Your system's circuits and a typical evening, for Xcode previews. Never connects.
     static var preview: PoolStore {
         let store = PoolStore()
+        store.isDemo = true
+        let args = ProcessInfo.processInfo.arguments
+        store.login = args.contains("-demoSignIn") ? nil : SavedLogin(systemName: "Pentair: 12-34-56")
         store.config = ControllerConfig(
             isCelsius: false, minSetPoint: [40, 40], maxSetPoint: [104, 104],
             hasSolar: false, hasIntelliBrite: true,
@@ -34,8 +37,11 @@ extension PoolStore {
             Schedule(id: 705, kind: .recurring, circuitId: 502, startMinutes: 540, stopMinutes: 555, days: .everyDay),
             Schedule(id: 701, kind: .recurring, circuitId: 510, startMinutes: 540, stopMinutes: 1140, days: .everyDay),
             Schedule(id: 702, kind: .recurring, circuitId: 503, startMinutes: 1200, stopMinutes: 1320, days: .everyDay),
+            Schedule(id: 703, kind: .recurring, circuitId: 500, startMinutes: 1110, stopMinutes: 1260, days: .weekend),
+            Schedule(id: 704, kind: .recurring, circuitId: 507, startMinutes: 1170, stopMinutes: 1350, days: [.friday, .saturday]),
         ]
         store.schedulesLoaded = true
+        store.lightColors = [503: .caribbean, 504: .caribbean]
         return store
     }
 }

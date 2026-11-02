@@ -110,6 +110,7 @@ private struct TabScreen: View {
     let tab: PoolTab
     var onSettings: () -> Void = {}
     @Environment(PoolStore.self) private var store
+    @State private var showSchedule = false
 
     var body: some View {
         NavigationStack {
@@ -137,6 +138,12 @@ private struct TabScreen: View {
             .animation(.easeInOut(duration: 0.6), value: isWarm)
             .refreshable { await store.refresh() }
             .toolbar(.hidden, for: .navigationBar)
+            .navigationDestination(isPresented: $showSchedule) { ScheduleView() }
+            #if DEBUG
+            .onAppear {
+                if ProcessInfo.processInfo.arguments.contains("-openSchedule") { showSchedule = true }
+            }
+            #endif
         }
     }
 
@@ -157,9 +164,7 @@ private struct TabScreen: View {
                 .accessibilityAddTraits(.isHeader)
             Spacer()
             HStack(spacing: 0) {
-                NavigationLink {
-                    ScheduleView()
-                } label: {
+                Button { showSchedule = true } label: {
                     Image(systemName: "calendar.badge.clock")
                         .frame(width: 48, height: 44)
                 }

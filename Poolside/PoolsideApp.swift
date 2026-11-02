@@ -2,7 +2,13 @@ import SwiftUI
 
 @main
 struct PoolsideApp: App {
-    @State private var store = PoolStore()
+    @State private var store: PoolStore = {
+        #if DEBUG
+        // Launch with -demo for sample data that never touches the pool (screenshots, demos).
+        if ProcessInfo.processInfo.arguments.contains("-demo") { return .preview }
+        #endif
+        return PoolStore()
+    }()
 
     var body: some Scene {
         WindowGroup {

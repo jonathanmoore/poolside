@@ -30,6 +30,8 @@ final class PoolStore {
     var schedules: [Schedule] = []
     var schedulesLoaded = false
 
+    /// Sample data only: never connect. Set by the debug preview store.
+    @ObservationIgnored var isDemo = false
     @ObservationIgnored private var client: ScreenLogicClient?
     @ObservationIgnored private var pollTask: Task<Void, Never>?
     @ObservationIgnored private var isConnecting = false
@@ -90,7 +92,7 @@ final class PoolStore {
     }
 
     func connect() async {
-        guard let login, !isConnecting else { return }
+        guard let login, !isConnecting, !isDemo else { return }
         isConnecting = true
         defer { isConnecting = false }
         disconnect()
