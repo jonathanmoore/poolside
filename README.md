@@ -79,6 +79,7 @@ Debug builds accept launch arguments (Xcode: Product > Scheme > Edit Scheme > Ar
 - Tried read-only against a real adapter: the checker logged in on home WiFi with no password and read config and status. Over Pentair's remote server, the checker and the app's Swift protocol code both logged in and decoded the same values.
 - Discovery found the real adapter on WiFi. Only the subnet broadcast got an answer; the 255.255.255.255 broadcast didn't.
 - Commands from the app have reached the real controller: circuits and lights on and off, heat mode and the target temperature.
+- Away from home: off WiFi the app skips the local search and goes straight to Pentair's server, waits for a network that's still coming up instead of failing on the spot, and says so plainly if iOS has Cellular Data off for Poolside. It reconnects by itself when the phone leaves or joins WiFi. Not yet built or tried on a phone away from home.
 - Schedules: the app's Swift code reads the real adapter's 7 schedules correctly. Add, edit and delete pass against the mock adapter; none has been sent to the real controller yet.
 - Light colors: the controller doesn't report the current color, so the app shows the last one picked in the app.
 

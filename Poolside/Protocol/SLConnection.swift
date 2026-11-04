@@ -8,16 +8,20 @@ enum SLError: LocalizedError {
     case rejected(UInt16)
     case notFound
     case remoteUnavailable
+    case cellularOff
+    case notOnWiFi
     case closed
 
     var errorDescription: String? {
         switch self {
         case .timeout(let what): return "Timed out waiting for \(what)."
-        case .connectionFailed(let why): return "Couldn't connect: \(why)"
+        case .connectionFailed(let why): return "Couldn't connect. \(why)"
         case .loginFailed: return "The pool controller turned down the password."
         case .rejected(let code): return "The pool controller rejected that command (\(code))."
         case .notFound: return "Couldn't find your pool controller."
         case .remoteUnavailable: return "Pentair's server doesn't know this system, or remote access is off."
+        case .cellularOff: return "Poolside isn't allowed to use cellular data. In the Settings app, open Poolside and turn on Cellular Data."
+        case .notOnWiFi: return "You're not on WiFi. Set Connect to Auto or Away to reach your pool from here."
         case .closed: return "The connection closed."
         }
     }
@@ -43,20 +47,23 @@ final class SLConnection: @unchecked Sendable {
     /// Called on the connection queue once, when the connection drops.
     var onClose: ((Error?) -> Void)?
 
-    init(host: String, port: UInt16) {
+    /// `localOnly` keeps the connection off cellular: a home address like 192.168.x.x means nothing there.
+    init(host: String, port: UInt16, localOnly: Bool = false) {
         let tcp = NWProtocolTCP.Options()
         tcp.enableKeepalive = true
         tcp.connectionTimeout = 8
         let params = NWParameters(tls: nil, tcp: tcp)
+        if localOnly { params.prohibitedInterfaceTypes = [.cellular] }
         connection = NWConnection(host: NWEndpoint.Host(host),
                                   port: NWEndpoint.Port(rawValue: port) ?? 80,
                                   using: params)
     }
 
-    func open(timeout: TimeInterval) async throws {
+    func open(timeout: TimeInterval, what: String = "the pool controller") async throws {
         do {
             try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
                 var resumed = false
+                var waitingFor: NWError?
                 let finish: (Result<Void, Error>) -> Void = { result in
                     guard !resumed else { return }
                     resumed = true
@@ -68,9 +75,12 @@ final class SLConnection: @unchecked Sendable {
                         finish(.success(()))
                         self?.receiveLoop()
                     case .waiting(let error):
-                        finish(.failure(SLError.connectionFailed(error.localizedDescription)))
+                        // Not a failure. iOS has no usable network for this yet (common right after
+                        // the app comes back, or while the phone moves off WiFi) and retries by
+                        // itself when one shows up. Keep waiting until the timeout.
+                        waitingFor = error
                     case .failed(let error):
-                        finish(.failure(SLError.connectionFailed(error.localizedDescription)))
+                        finish(.failure(SLError.connectionFailed(SLConnection.describe(error))))
                         self?.handleClosed(error)
                     case .cancelled:
                         finish(.failure(SLError.closed))
@@ -81,7 +91,11 @@ final class SLConnection: @unchecked Sendable {
                 }
                 connection.start(queue: queue)
                 queue.asyncAfter(deadline: .now() + timeout) {
-                    finish(.failure(SLError.timeout("the pool controller")))
+                    if let waitingFor {
+                        finish(.failure(SLError.connectionFailed(SLConnection.describe(waitingFor))))
+                    } else {
+                        finish(.failure(SLError.timeout(what)))
+                    }
                 }
             }
         } catch {
@@ -92,6 +106,20 @@ final class SLConnection: @unchecked Sendable {
 
     func close() {
         queue.async { self.connection.cancel() }
+    }
+
+    /// Plain words for the network errors people actually hit.
+    static func describe(_ error: NWError) -> String {
+        if case .posix(let code) = error {
+            switch code {
+            case .ENETDOWN, .ENETUNREACH: return "The phone has no internet connection right now."
+            case .EHOSTUNREACH, .EHOSTDOWN: return "That address can't be reached from this network."
+            case .ECONNREFUSED: return "The adapter turned the connection down."
+            case .ETIMEDOUT: return "Nothing answered."
+            default: break
+            }
+        }
+        return error.localizedDescription
     }
 
     func sendRaw(_ data: Data) async throws {
@@ -196,8 +224,8 @@ final class ScreenLogicClient: @unchecked Sendable {
     }
 
     static func connect(host: String, port: UInt16, password: String?,
-                        timeout: TimeInterval = 6) async throws -> ScreenLogicClient {
-        let connection = SLConnection(host: host, port: port)
+                        timeout: TimeInterval = 6, localOnly: Bool = false) async throws -> ScreenLogicClient {
+        let connection = SLConnection(host: host, port: port, localOnly: localOnly)
         try await connection.open(timeout: timeout)
         let client = ScreenLogicClient(connection: connection)
         do {
@@ -326,7 +354,7 @@ enum SLDispatcher {
 
     static func locate(systemName: String) async throws -> RemoteGateway {
         let connection = SLConnection(host: host, port: port)
-        try await connection.open(timeout: 8)
+        try await connection.open(timeout: 8, what: "Pentair's server")
         defer { connection.close() }
         var w = ByteWriter()
         w.string(systemName)
