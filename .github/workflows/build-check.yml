@@ -1,0 +1,15 @@
+name: Build check
+on:
+  push:
+    branches: [fix/remote-away]
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build for the simulator
+        run: |
+          xcodebuild -version
+          xcodebuild -project Poolside.xcodeproj -scheme Poolside -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build | tail -60
+          exit ${PIPESTATUS[0]}
