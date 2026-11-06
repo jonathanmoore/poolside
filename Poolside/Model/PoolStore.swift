@@ -37,7 +37,7 @@ final class PoolStore {
     @ObservationIgnored private var pollTask: Task<Void, Never>?
     @ObservationIgnored private var isConnecting = false
     /// Which network the phone is on. Tells us when it leaves or joins WiFi.
-    @ObservationIgnored private let pathMonitor = NWPathMonitor()
+    private let pathMonitor = NWPathMonitor()
     @ObservationIgnored private var path: NWPath?
 
     init() {
