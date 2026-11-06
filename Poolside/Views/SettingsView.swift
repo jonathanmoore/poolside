@@ -7,7 +7,17 @@ struct SettingsView: View {
     @State private var host = ""
     @State private var port = "80"
     @State private var password = ""
+    @State private var showPassword = false
+    @State private var hasSavedPassword = LoginStore.password() != nil
+    @State private var passwordStatus: PasswordStatus = .idle
+    @FocusState private var passwordFocused: Bool
     @State private var confirmSignOut = false
+
+    private enum PasswordStatus: Equatable {
+        case idle, saving
+        case saved(String)
+        case failed(String)
+    }
 
     var body: some View {
         NavigationStack {
@@ -43,14 +53,53 @@ struct SettingsView: View {
                     }
                 }
 
-                Section("Remote password") {
-                    SecureField("Remote password", text: $password)
+                Section {
+                    HStack {
+                        Group {
+                            if showPassword {
+                                TextField(passwordPlaceholder, text: $password)
+                            } else {
+                                SecureField(passwordPlaceholder, text: $password)
+                            }
+                        }
                         .textContentType(.password)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .focused($passwordFocused)
                         .submitLabel(.done)
                         .onSubmit(savePassword)
-                    // Always enabled on purpose: flipping it from disabled to enabled on the first
-                    // keystroke redraws this section and knocks the keyboard out of the field.
-                    Button("Update password", action: savePassword)
+
+                        Button {
+                            showPassword.toggle()
+                            passwordFocused = true
+                        } label: {
+                            Image(systemName: showPassword ? "eye.slash" : "eye")
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel(showPassword ? "Hide password" : "Show password")
+                    }
+                    // Only disabled while saving. Flipping it on the first keystroke would redraw
+                    // this section and knock the keyboard out of the field.
+                    Button(action: savePassword) {
+                        HStack {
+                            Text(passwordStatus == .saving ? "Saving and reconnecting…" : "Update password")
+                            Spacer()
+                            if passwordStatus == .saving { ProgressView() }
+                        }
+                    }
+                    .disabled(passwordStatus == .saving)
+                } header: {
+                    Text("Remote password")
+                } footer: {
+                    passwordFooter
+                }
+                .sensoryFeedback(trigger: passwordStatus) { _, new in
+                    switch new {
+                    case .saved: return .success
+                    case .failed: return .error
+                    default: return nil
+                    }
                 }
 
                 Section {
@@ -85,10 +134,47 @@ struct SettingsView: View {
         }
     }
 
+    private var passwordPlaceholder: String {
+        hasSavedPassword ? "Saved. Type a new one to replace it" : "Remote password"
+    }
+
+    @ViewBuilder private var passwordFooter: some View {
+        switch passwordStatus {
+        case .saved(let message):
+            Label(message, systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+        case .failed(let message):
+            Label(message, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red)
+        case .idle, .saving:
+            Text(hasSavedPassword
+                 ? "A password is saved on this phone. You only need it away from home."
+                 : "No password saved. You only need it away from home.")
+        }
+    }
+
     private func savePassword() {
-        guard !password.isEmpty else { return }
-        LoginStore.setPassword(password)
+        let value = password
+        guard !value.isEmpty else {
+            passwordFocused = true
+            return
+        }
+        passwordFocused = false
+        LoginStore.setPassword(value)
         password = ""
-        Task { await store.connect() }
+        showPassword = false
+        hasSavedPassword = true
+        passwordStatus = .saving
+        Task {
+            await store.connect()
+            switch store.phase {
+            case .connected where store.link == .remote:
+                passwordStatus = .saved("Saved, and it works through Pentair's server.")
+            case .connected:
+                passwordStatus = .saved("Saved. You're on home WiFi, so it gets used next time you're away.")
+            case .failed(let message):
+                passwordStatus = .failed("Saved, but couldn't connect. \(message)")
+            default:
+                passwordStatus = .saved("Saved.")
+            }
+        }
     }
 }

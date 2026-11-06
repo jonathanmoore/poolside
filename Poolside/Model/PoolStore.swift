@@ -1,4 +1,5 @@
 import Foundation
+import Network
 import Observation
 
 enum LinkKind {
@@ -35,9 +36,16 @@ final class PoolStore {
     @ObservationIgnored private var client: ScreenLogicClient?
     @ObservationIgnored private var pollTask: Task<Void, Never>?
     @ObservationIgnored private var isConnecting = false
+    /// Which network the phone is on. Tells us when it leaves or joins WiFi.
+    private let pathMonitor = NWPathMonitor()
+    @ObservationIgnored private var path: NWPath?
 
     init() {
         login = LoginStore.load()
+        pathMonitor.pathUpdateHandler = { [weak self] newPath in
+            Task { @MainActor in self?.pathChanged(newPath) }
+        }
+        pathMonitor.start(queue: DispatchQueue(label: "poolside.path"))
     }
 
     // MARK: - Session
@@ -118,13 +126,22 @@ final class PoolStore {
 
     private func openClient(_ login: SavedLogin, password: String?) async throws -> (ScreenLogicClient, LinkKind) {
         var localError: Error?
+        let network = await currentPath()
 
-        if login.mode != .remote {
+        if let network, network.status != .satisfied, network.unsatisfiedReason == .cellularDenied {
+            throw SLError.cellularOff
+        }
+        // Unknown counts as WiFi so a slow first reading never skips home.
+        let onWiFi = network.map { $0.usesInterfaceType(.wifi) || $0.usesInterfaceType(.wiredEthernet) } ?? true
+        if login.mode == .local && !onWiFi { throw SLError.notOnWiFi }
+
+        // Away from home there's no point looking on the local network. Go straight to Pentair.
+        if login.mode != .remote && onWiFi {
             phase = .connecting("Looking on your WiFi…")
             if !login.localHost.isEmpty {
                 do {
                     let c = try await ScreenLogicClient.connect(host: login.localHost, port: login.localPort,
-                                                                password: password, timeout: 3)
+                                                                password: password, timeout: 3, localOnly: true)
                     return (c, .local)
                 } catch {
                     localError = error
@@ -136,7 +153,7 @@ final class PoolStore {
             if let gateway = match, gateway.host != login.localHost || localError == nil {
                 do {
                     let c = try await ScreenLogicClient.connect(host: gateway.host, port: gateway.port,
-                                                                password: password, timeout: 4)
+                                                                password: password, timeout: 4, localOnly: true)
                     rememberLocal(gateway)
                     return (c, .local)
                 } catch {
@@ -155,6 +172,43 @@ final class PoolStore {
         }
 
         throw localError ?? SLError.notFound
+    }
+
+    /// The monitor reports within a moment of starting. Don't hold up a connect for long if it hasn't.
+    private func currentPath() async -> NWPath? {
+        for _ in 0..<10 where path == nil {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+        return path
+    }
+
+    private func pathChanged(_ newPath: NWPath) {
+        let old = path
+        path = newPath
+        guard let old, login != nil, !isDemo else { return }
+        func wifi(_ p: NWPath) -> Bool {
+            p.status == .satisfied && (p.usesInterfaceType(.wifi) || p.usesInterfaceType(.wiredEthernet))
+        }
+        let cameOnline = old.status != .satisfied && newPath.status == .satisfied
+        let leftWiFi = wifi(old) && !wifi(newPath)
+        let joinedWiFi = !wifi(old) && wifi(newPath)
+
+        switch phase {
+        case .failed:
+            // Back online, or on a different kind of network: worth another try.
+            if cameOnline || leftWiFi || joinedWiFi { Task { await connect() } }
+        case .connected:
+            if link == .local && leftWiFi {
+                // Walked out of WiFi range. The home connection can hang for a while before it
+                // notices, so switch to Pentair's server now.
+                Task { await connect() }
+            } else if link == .remote && joinedWiFi && login?.mode == .auto {
+                // Got home. The local link is faster and doesn't depend on Pentair.
+                Task { await connect() }
+            }
+        default:
+            break
+        }
     }
 
     private func rememberLocal(_ gateway: LocalGateway) {
