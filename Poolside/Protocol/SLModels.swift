@@ -79,6 +79,9 @@ struct EquipmentState: Equatable {
     var circuitOn: [Int: Bool] = [:]
     var saltPPM = 0
     var pH = 0.0
+    var poolDelay = false
+    var spaDelay = false
+    var cleanerDelay = false
 
     static func decode(_ msg: SLMessage) throws -> EquipmentState {
         var r = msg.reader
@@ -86,9 +89,9 @@ struct EquipmentState: Equatable {
         _ = try r.int32() // panel mode
         s.freezeMode = try r.uint8() != 0
         _ = try r.uint8() // remotes
-        _ = try r.uint8() // pool delay
-        _ = try r.uint8() // spa delay
-        _ = try r.uint8() // cleaner delay
+        s.poolDelay = try r.uint8() != 0
+        s.spaDelay = try r.uint8() != 0
+        s.cleanerDelay = try r.uint8() != 0
         try r.skip(3)
         s.airTemperature = try r.int32()
         let rawBodyCount = try r.int32()

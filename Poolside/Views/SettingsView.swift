@@ -104,9 +104,12 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    NavigationLink("Valves") { ValveDebugView() }
                     NavigationLink("Equipment details") { EquipmentDetailsView() }
+                } header: {
+                    Text("Debug")
                 } footer: {
-                    Text("Every circuit the controller reports, what's on right now, and every command Poolside has sent. Read only.")
+                    Text("Valves shows which side the suction and return should be on, with a guarded Pool/Spa switch. Equipment details lists every circuit and every command Poolside has sent.")
                 }
 
                 Section {
@@ -247,5 +250,80 @@ struct EquipmentDetailsView: View {
         lines.append("Commands sent:")
         lines.append(contentsOf: store.commandLog.isEmpty ? ["none"] : store.commandLog)
         return lines.joined(separator: "\n")
+    }
+}
+
+/// Shows which side the controller should be turning each valve to, so you can check it at the pad.
+/// There's one Pool/Spa switch on purpose: both valves always move together.
+struct ValveDebugView: View {
+    @Environment(PoolStore.self) private var store
+    @State private var confirmTo: Bool?   // true = to spa, false = to pool
+    @State private var watchUntil: Date?
+    @State private var cameFromSpa = false
+
+    var body: some View {
+        let expected = store.expectedValves
+        let spaOn = expected.mode == "Spa"
+        List {
+            Section {
+                LabeledContent("Mode", value: expected.mode)
+                LabeledContent("Suction", value: expected.suction.rawValue)
+                LabeledContent("Return", value: expected.returnSide.rawValue)
+            } header: {
+                Text("Expected now")
+            } footer: {
+                Text("\(expected.reason) Poolside can't see the valves. These are the sides the controller should turn them to. Check they match at the pad.")
+            }
+
+            Section("Controller delays") {
+                LabeledContent("Pool delay", value: store.state.poolDelay ? "Active" : "Off")
+                LabeledContent("Spa delay", value: store.state.spaDelay ? "Active" : "Off")
+            }
+
+            Section {
+                if let until = watchUntil {
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        let left = max(0, Int(until.timeIntervalSince(context.date)))
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Watch both actuators").font(.headline)
+                            Text(left > 0
+                                 ? "They take about 30 seconds to turn. \(left)s left."
+                                 : "Did both end up on the \(expected.suction.rawValue) side?")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Button("Both turned") { watchUntil = nil }
+                    Button("Switch back", role: .destructive) {
+                        watchUntil = nil
+                        Task { await store.switchMode(toSpa: cameFromSpa) }
+                    }
+                } else {
+                    Button(spaOn ? "Switch to Pool" : "Switch to Spa") { confirmTo = !spaOn }
+                        .disabled(store.phase != .connected || store.circuit(for: .spa) == nil)
+                }
+            } header: {
+                Text("Switch")
+            } footer: {
+                Text("Turns the Spa circuit on or off, the same thing Pentair's app does. Pool mode also makes sure the Pool circuit is on. If the two valves end up on different sides, tap Switch back right away.")
+            }
+        }
+        .navigationTitle("Valves")
+        .confirmationDialog(confirmTitle, isPresented: Binding(get: { confirmTo != nil }, set: { if !$0 { confirmTo = nil } }),
+                            titleVisibility: .visible) {
+            Button(confirmTo == true ? "Switch to Spa" : "Switch to Pool") {
+                let toSpa = confirmTo == true
+                confirmTo = nil
+                cameFromSpa = !toSpa
+                watchUntil = Date().addingTimeInterval(60)
+                Task { await store.switchMode(toSpa: toSpa) }
+            }
+            Button("Cancel", role: .cancel) { confirmTo = nil }
+        } message: {
+            Text("Both the suction and return should turn to the \(confirmTo == true ? "spa" : "pool") side. Stand where you can see both actuators first.")
+        }
+    }
+
+    private var confirmTitle: String {
+        confirmTo == true ? "Switch to Spa?" : "Switch to Pool?"
     }
 }
