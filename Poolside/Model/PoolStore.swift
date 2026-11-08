@@ -29,6 +29,8 @@ final class PoolStore {
     /// Last color picked per light id. The controller doesn't report it, so the app remembers.
     var lightColors: [Int: LightScene] = PoolStore.loadLightColors()
     var schedules: [Schedule] = []
+    /// Every command sent this session, newest last. Shown in Settings > Equipment details.
+    var commandLog: [String] = []
     var schedulesLoaded = false
 
     /// Sample data only: never connect. Set by the debug preview store.
@@ -352,6 +354,7 @@ final class PoolStore {
 
     func setCircuit(_ circuit: Circuit, on: Bool) async {
         guard let client else { return }
+        log("Circuit \(circuit.id) \"\(circuit.name)\" (\(circuit.function)) \(on ? "ON" : "OFF")")
         state.circuitOn[circuit.id] = on
         busy.insert(circuit.id)
         defer { busy.remove(circuit.id) }
@@ -365,18 +368,21 @@ final class PoolStore {
 
     func setHeatMode(_ body: BodyType, _ mode: HeatMode) async {
         guard let client else { return }
+        log("Heat mode \(body.name) to \(mode.name)")
         state.bodies[body.rawValue].heatMode = mode.rawValue
         await run { try await client.setHeatMode(body, to: mode) }
     }
 
     func setSetPoint(_ body: BodyType, _ value: Int) async {
         guard let client else { return }
+        log("Set point \(body.name) to \(value)")
         state.bodies[body.rawValue].setPoint = value
         await run { try await client.setSetPoint(body, to: value) }
     }
 
     func sendLights(_ scene: LightScene) async {
         guard let client else { return }
+        log("Light scene \(scene.rawValue)")
         await run { try await client.sendLights(scene) }
     }
 
@@ -409,6 +415,7 @@ final class PoolStore {
     /// Saves an edit, or adds the schedule when `isNew`. Throws so the editor can stay open on failure.
     func saveSchedule(_ schedule: Schedule, isNew: Bool) async throws {
         guard let client else { throw SLError.closed }
+        log("\(isNew ? "Add" : "Save") schedule for circuit \(schedule.circuitId) \"\(circuitName(schedule.circuitId))\"")
         var toSave = schedule
         if isNew {
             toSave.id = try await client.addSchedule(schedule.kind)
@@ -427,6 +434,7 @@ final class PoolStore {
 
     func deleteSchedule(_ schedule: Schedule) async {
         guard let client else { return }
+        log("Delete schedule \(schedule.id)")
         schedules.removeAll { $0.id == schedule.id }
         do {
             try await client.deleteSchedule(id: schedule.id)
@@ -435,6 +443,12 @@ final class PoolStore {
             notice = error.localizedDescription
         }
         await loadSchedules()
+    }
+
+    private func log(_ line: String) {
+        let time = Date().formatted(date: .omitted, time: .standard)
+        commandLog.append("\(time)  \(line)")
+        if commandLog.count > 200 { commandLog.removeFirst(commandLog.count - 200) }
     }
 
     private func run(_ command: @escaping () async throws -> Void) async {
