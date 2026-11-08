@@ -346,6 +346,44 @@ final class PoolStore {
         return config.isCelsius ? 4...40 : 40...104
     }
 
+    // MARK: - Valves
+
+    /// Where the controller should be turning the suction and return valves right now.
+    /// ScreenLogic can't read valve positions, so this is worked out from the circuits.
+    struct ValveExpectation: Equatable {
+        enum Side: String { case pool = "Pool", spa = "Spa" }
+        let mode: String
+        let suction: Side
+        let returnSide: Side
+        let reason: String
+    }
+
+    var expectedValves: ValveExpectation {
+        let spaOn = circuit(for: .spa).map(isOn) ?? false
+        let spillwayOn = config.circuits.first { $0.function == .spillway }.map(isOn) ?? false
+        if spaOn {
+            return .init(mode: "Spa", suction: .spa, returnSide: .spa, reason: "The Spa circuit is on.")
+        }
+        if spillwayOn {
+            return .init(mode: "Spillway", suction: .pool, returnSide: .spa,
+                         reason: "The spillway is on, so water comes from the pool and spills over from the spa.")
+        }
+        return .init(mode: "Pool", suction: .pool, returnSide: .pool, reason: "The Spa circuit is off.")
+    }
+
+    /// Spa mode is the Spa circuit on. Pool mode is Spa off and Pool on, so the pump keeps running.
+    func switchMode(toSpa: Bool) async {
+        guard let spa = circuit(for: .spa) else { return }
+        if toSpa {
+            await setCircuit(spa, on: true)
+        } else {
+            await setCircuit(spa, on: false)
+            if let pool = circuit(for: .pool), !isOn(pool) {
+                await setCircuit(pool, on: true)
+            }
+        }
+    }
+
     // MARK: - Commands
 
     func toggle(_ circuit: Circuit) async {
