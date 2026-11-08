@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct SettingsView: View {
     @Environment(PoolStore.self) private var store
@@ -103,6 +104,12 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    NavigationLink("Equipment details") { EquipmentDetailsView() }
+                } footer: {
+                    Text("Every circuit the controller reports, what's on right now, and every command Poolside has sent. Read only.")
+                }
+
+                Section {
                     Button("Reconnect") { Task { await store.connect() } }
                     Button("Sign out", role: .destructive) { confirmSignOut = true }
                 }
@@ -176,5 +183,69 @@ struct SettingsView: View {
                 passwordStatus = .saved("Saved.")
             }
         }
+    }
+}
+
+/// Read-only view of the controller's circuits and of what Poolside has sent. For tracking down
+/// problems like a valve that didn't move: compare what's on after Pentair's app vs. Poolside.
+struct EquipmentDetailsView: View {
+    @Environment(PoolStore.self) private var store
+    @State private var copied = false
+
+    var body: some View {
+        List {
+            Section {
+                ForEach(store.config.circuits) { c in
+                    HStack(alignment: .firstTextBaseline) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(c.name)
+                            Text("id \(c.id) · function \(String(describing: c.function)) (\(c.functionCode)) · \(String(describing: c.interface))")
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text(store.isOn(c) ? "ON" : "off")
+                            .font(.caption.monospaced().bold())
+                            .foregroundStyle(store.isOn(c) ? .green : .secondary)
+                    }
+                }
+            } header: {
+                Text("Circuits")
+            } footer: {
+                if let last = store.lastUpdate {
+                    Text("Updated \(last.formatted(date: .omitted, time: .standard))")
+                }
+            }
+
+            Section("Commands sent this session") {
+                if store.commandLog.isEmpty {
+                    Text("None yet").foregroundStyle(.secondary)
+                } else {
+                    ForEach(Array(store.commandLog.enumerated().reversed()), id: \.offset) { _, line in
+                        Text(line).font(.caption.monospaced())
+                    }
+                }
+            }
+        }
+        .navigationTitle("Equipment details")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button(copied ? "Copied" : "Copy") {
+                    UIPasteboard.general.string = report
+                    copied = true
+                }
+            }
+        }
+    }
+
+    private var report: String {
+        var lines = ["Poolside equipment details \(Date().formatted())", "", "Circuits:"]
+        for c in store.config.circuits {
+            lines.append("\(c.id)  \(c.name)  function=\(c.function)(\(c.functionCode))  interface=\(c.interface)(\(c.interfaceCode))  \(store.isOn(c) ? "ON" : "off")")
+        }
+        lines.append("")
+        lines.append("Commands sent:")
+        lines.append(contentsOf: store.commandLog.isEmpty ? ["none"] : store.commandLog)
+        return lines.joined(separator: "\n")
     }
 }
