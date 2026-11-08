@@ -1,0 +1,13 @@
+name: build-check
+on: push
+jobs:
+  build:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo xcode-select -s "$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)"
+      - run: |
+          set -o pipefail
+          xcodebuild -project Poolside.xcodeproj -scheme Poolside -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build 2>&1 | grep -E "error|BUILD"
+      - run: |
+          plutil -p "$(find ~/Library/Developer/Xcode/DerivedData -path '*Debug-iphonesimulator/Poolside.app/Info.plist' | head -1)" | grep -E "ITSApp|ShortVersion|CFBundleIcon" || true
