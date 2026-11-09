@@ -358,29 +358,56 @@ final class PoolStore {
         let reason: String
     }
 
-    var expectedValves: ValveExpectation {
-        let spaOn = circuit(for: .spa).map(isOn) ?? false
-        let spillwayOn = config.circuits.first { $0.function == .spillway }.map(isOn) ?? false
-        if spaOn {
-            return .init(mode: "Spa", suction: .spa, returnSide: .spa, reason: "The Spa circuit is on.")
-        }
-        if spillwayOn {
-            return .init(mode: "Spillway", suction: .pool, returnSide: .spa,
-                         reason: "The spillway is on, so water comes from the pool and spills over from the spa.")
-        }
-        return .init(mode: "Pool", suction: .pool, returnSide: .pool, reason: "The Spa circuit is off.")
+    enum WaterMode: String, CaseIterable, Identifiable {
+        case pool = "Pool", spillover = "Spillover", spa = "Spa"
+        var id: String { rawValue }
+        var suction: ValveExpectation.Side { self == .spa ? .spa : .pool }
+        var returnSide: ValveExpectation.Side { self == .pool ? .pool : .spa }
     }
 
-    /// Spa mode is the Spa circuit on. Pool mode is Spa off and Pool on, so the pump keeps running.
-    func switchMode(toSpa: Bool) async {
-        guard let spa = circuit(for: .spa) else { return }
-        if toSpa {
-            await setCircuit(spa, on: true)
-        } else {
-            await setCircuit(spa, on: false)
-            if let pool = circuit(for: .pool), !isOn(pool) {
-                await setCircuit(pool, on: true)
-            }
+    /// The circuit set to the Spillway function at the panel. Only this one tells the
+    /// controller to turn the return valve to the spa while suction stays on the pool.
+    /// A circuit that's only named "spillway" doesn't move any valve.
+    var spillwayCircuit: Circuit? {
+        config.circuits.first { $0.function == .spillway }
+    }
+
+    var waterMode: WaterMode {
+        if let spa = circuit(for: .spa), isOn(spa) { return .spa }
+        if let spill = spillwayCircuit, isOn(spill) { return .spillover }
+        return .pool
+    }
+
+    var expectedValves: ValveExpectation {
+        let mode = waterMode
+        let reason: String
+        switch mode {
+        case .spa: reason = "The Spa circuit is on."
+        case .spillover: reason = "The Spillway circuit is on, so water comes from the pool and returns to the spa to spill over."
+        case .pool: reason = "Spa and Spillway are off."
+        }
+        return .init(mode: mode.rawValue, suction: mode.suction, returnSide: mode.returnSide, reason: reason)
+    }
+
+    /// Moves between Pool, Spillover and Spa. Each step leaves suction on the pool or both
+    /// valves together, so it never sends suction to the spa with the return on the pool.
+    func switchMode(to mode: WaterMode) async {
+        let spa = circuit(for: .spa)
+        let pool = circuit(for: .pool)
+        let spill = spillwayCircuit
+        switch mode {
+        case .spa:
+            if let spill, isOn(spill) { await setCircuit(spill, on: false) }
+            if let spa { await setCircuit(spa, on: true) }
+        case .spillover:
+            guard let spill else { return }
+            if let spa, isOn(spa) { await setCircuit(spa, on: false) }
+            if let pool, !isOn(pool) { await setCircuit(pool, on: true) }
+            await setCircuit(spill, on: true)
+        case .pool:
+            if let spill, isOn(spill) { await setCircuit(spill, on: false) }
+            if let spa, isOn(spa) { await setCircuit(spa, on: false) }
+            if let pool, !isOn(pool) { await setCircuit(pool, on: true) }
         }
     }
 
