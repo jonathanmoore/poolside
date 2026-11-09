@@ -269,6 +269,9 @@ struct ValveDebugView: View {
                 LabeledContent("Mode", value: expected.mode)
                 LabeledContent("Suction", value: expected.suction.rawValue)
                 LabeledContent("Return", value: expected.returnSide.rawValue)
+                if current == .spillover {
+                    LabeledContent("Spillover returns to", value: store.spilloverReturnMode.rawValue)
+                }
             } header: {
                 Text("Expected now")
             } footer: {
@@ -338,7 +341,10 @@ struct ValveDebugView: View {
     }
 
     private var switchFooter: String {
-        var text = "Pool turns Spa and Spillway off and makes sure Pool is on. Spillover keeps suction on the pool and sends the return to the spa. Spa turns both to the spa. If suction ends up on the spa with the return on the pool, tap Switch back right away."
+        var text = "Pool turns Spa and Spillway off and makes sure Pool is on. Spillover keeps suction on the pool, sends the return to the spa and turns Pool High on. Leaving Spillover turns Pool High back off if Spillover turned it on. Spa turns both valves to the spa. If suction ends up on the spa with the return on the pool, tap Switch back right away."
+        if store.spillwayCircuit != nil, store.poolHigh == nil {
+            text += "\n\nNo Pool High circuit was found, so Spillover can't raise the pump speed. Set the Spillway circuit's pump speed at the panel instead."
+        }
         if store.spillwayCircuit == nil {
             text += "\n\nSpillover is off because no circuit on this controller has the Spillway function. Set one up at the EasyTouch panel or in Pentair's app, then reconnect."
         }

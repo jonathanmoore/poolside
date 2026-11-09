@@ -235,9 +235,11 @@ private struct BodyControls: View {
                         // Spillover: suction from the pool, return to the spa so it spills over.
                         let on = store.waterMode == .spillover
                         ControlButton(title: "Spillover", systemImage: Theme.icon(for: circuit),
-                                      isOn: on, detail: on ? "Return to spa" : "Off", tint: tint,
+                                      isOn: on, detail: on ? "Pump on high" : "Off", tint: tint,
                                       isBusy: store.busy.contains(circuit.id)) {
-                            Task { await store.switchMode(to: on ? .pool : .spillover) }
+                            Task {
+                                if on { await store.endSpillover() } else { await store.switchMode(to: .spillover) }
+                            }
                         }
                     } else {
                         ControlButton(title: circuit.name, systemImage: Theme.icon(for: circuit),

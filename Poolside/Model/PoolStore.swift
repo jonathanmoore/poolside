@@ -389,26 +389,63 @@ final class PoolStore {
         return .init(mode: mode.rawValue, suction: mode.suction, returnSide: mode.returnSide, reason: reason)
     }
 
+    // What Spillover changed, so turning it off can put things back. Kept across launches.
+    private static let spilloverFromKey = "spillover.cameFrom"
+    private static let spilloverHighKey = "spillover.turnedOnHigh"
+
+    /// The mode Spillover will go back to when it's turned off.
+    var spilloverReturnMode: WaterMode {
+        UserDefaults.standard.string(forKey: Self.spilloverFromKey).flatMap(WaterMode.init(rawValue:)) ?? .pool
+    }
+
     /// Moves between Pool, Spillover and Spa. Each step leaves suction on the pool or both
     /// valves together, so it never sends suction to the spa with the return on the pool.
+    ///
+    /// Spillover also runs the pump on high by turning on the Pool High circuit. Leaving
+    /// Spillover turns Pool High back off if Spillover turned it on, so the pump goes back
+    /// to whatever speed the schedule or the other circuits call for.
     func switchMode(to mode: WaterMode) async {
         let spa = circuit(for: .spa)
         let pool = circuit(for: .pool)
         let spill = spillwayCircuit
+        let from = waterMode
+        let defaults = UserDefaults.standard
+
         switch mode {
         case .spa:
             if let spill, isOn(spill) { await setCircuit(spill, on: false) }
             if let spa { await setCircuit(spa, on: true) }
         case .spillover:
             guard let spill else { return }
+            if from != .spillover {
+                defaults.set(from.rawValue, forKey: Self.spilloverFromKey)
+                defaults.set(false, forKey: Self.spilloverHighKey)
+            }
             if let spa, isOn(spa) { await setCircuit(spa, on: false) }
             if let pool, !isOn(pool) { await setCircuit(pool, on: true) }
             await setCircuit(spill, on: true)
+            if let high = poolHigh, high.id != spill.id, !isOn(high) {
+                await setCircuit(high, on: true)
+                defaults.set(true, forKey: Self.spilloverHighKey)
+            }
         case .pool:
             if let spill, isOn(spill) { await setCircuit(spill, on: false) }
             if let spa, isOn(spa) { await setCircuit(spa, on: false) }
             if let pool, !isOn(pool) { await setCircuit(pool, on: true) }
         }
+
+        if from == .spillover, mode != .spillover {
+            if defaults.bool(forKey: Self.spilloverHighKey), let high = poolHigh, isOn(high) {
+                await setCircuit(high, on: false)
+            }
+            defaults.removeObject(forKey: Self.spilloverFromKey)
+            defaults.removeObject(forKey: Self.spilloverHighKey)
+        }
+    }
+
+    /// Turns Spillover off and goes back to the mode that was on before it, Pool or Spa.
+    func endSpillover() async {
+        await switchMode(to: spilloverReturnMode)
     }
 
     // MARK: - Commands
