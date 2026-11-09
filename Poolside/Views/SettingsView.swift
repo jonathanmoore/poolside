@@ -254,21 +254,24 @@ struct EquipmentDetailsView: View {
 }
 
 /// Shows which side the controller should be turning each valve to, so you can check it at the pad.
-/// There's one Pool/Spa switch on purpose: both valves always move together.
+/// The switch moves between whole modes on purpose: Poolside never turns one valve by hand.
 struct ValveDebugView: View {
     @Environment(PoolStore.self) private var store
-    @State private var confirmTo: Bool?   // true = to spa, false = to pool
+    @State private var confirmTo: PoolStore.WaterMode?
     @State private var watchUntil: Date?
-    @State private var cameFromSpa = false
+    @State private var cameFrom: PoolStore.WaterMode = .pool
 
     var body: some View {
         let expected = store.expectedValves
-        let spaOn = expected.mode == "Spa"
+        let current = store.waterMode
         List {
             Section {
                 LabeledContent("Mode", value: expected.mode)
                 LabeledContent("Suction", value: expected.suction.rawValue)
                 LabeledContent("Return", value: expected.returnSide.rawValue)
+                if current == .spillover {
+                    LabeledContent("Spillover returns to", value: store.spilloverReturnMode.rawValue)
+                }
             } header: {
                 Text("Expected now")
             } footer: {
@@ -288,42 +291,63 @@ struct ValveDebugView: View {
                             Text("Watch both actuators").font(.headline)
                             Text(left > 0
                                  ? "They take about 30 seconds to turn. \(left)s left."
-                                 : "Did both end up on the \(expected.suction.rawValue) side?")
+                                 : "Is suction on the \(expected.suction.rawValue.lowercased()) side and return on the \(expected.returnSide.rawValue.lowercased()) side?")
                                 .foregroundStyle(.secondary)
                         }
                     }
                     Button("Both turned") { watchUntil = nil }
-                    Button("Switch back", role: .destructive) {
+                    Button("Switch back to \(cameFrom.rawValue)", role: .destructive) {
                         watchUntil = nil
-                        Task { await store.switchMode(toSpa: cameFromSpa) }
+                        Task { await store.switchMode(to: cameFrom) }
                     }
                 } else {
-                    Button(spaOn ? "Switch to Pool" : "Switch to Spa") { confirmTo = !spaOn }
-                        .disabled(store.phase != .connected || store.circuit(for: .spa) == nil)
+                    ForEach(PoolStore.WaterMode.allCases.filter { $0 != current }) { mode in
+                        Button("Switch to \(mode.rawValue)") { confirmTo = mode }
+                            .disabled(store.phase != .connected || !available(mode))
+                    }
                 }
             } header: {
                 Text("Switch")
             } footer: {
-                Text("Turns the Spa circuit on or off, the same thing Pentair's app does. Pool mode also makes sure the Pool circuit is on. If the two valves end up on different sides, tap Switch back right away.")
+                Text(switchFooter)
             }
         }
         .navigationTitle("Valves")
-        .confirmationDialog(confirmTitle, isPresented: Binding(get: { confirmTo != nil }, set: { if !$0 { confirmTo = nil } }),
+        .confirmationDialog(confirmTo.map { "Switch to \($0.rawValue)?" } ?? "",
+                            isPresented: Binding(get: { confirmTo != nil }, set: { if !$0 { confirmTo = nil } }),
                             titleVisibility: .visible) {
-            Button(confirmTo == true ? "Switch to Spa" : "Switch to Pool") {
-                let toSpa = confirmTo == true
-                confirmTo = nil
-                cameFromSpa = !toSpa
-                watchUntil = Date().addingTimeInterval(60)
-                Task { await store.switchMode(toSpa: toSpa) }
+            if let mode = confirmTo {
+                Button("Switch to \(mode.rawValue)") {
+                    confirmTo = nil
+                    cameFrom = current
+                    watchUntil = Date().addingTimeInterval(60)
+                    Task { await store.switchMode(to: mode) }
+                }
             }
             Button("Cancel", role: .cancel) { confirmTo = nil }
         } message: {
-            Text("Both the suction and return should turn to the \(confirmTo == true ? "spa" : "pool") side. Stand where you can see both actuators first.")
+            if let mode = confirmTo {
+                Text("Suction should go to the \(mode.suction.rawValue.lowercased()) side and return to the \(mode.returnSide.rawValue.lowercased()) side. Stand where you can see both actuators first.")
+            }
         }
     }
 
-    private var confirmTitle: String {
-        confirmTo == true ? "Switch to Spa?" : "Switch to Pool?"
+    private func available(_ mode: PoolStore.WaterMode) -> Bool {
+        switch mode {
+        case .spa: return store.circuit(for: .spa) != nil
+        case .spillover: return store.spillwayCircuit != nil
+        case .pool: return true
+        }
+    }
+
+    private var switchFooter: String {
+        var text = "Pool turns Spa and Spillway off and makes sure Pool is on. Spillover keeps suction on the pool, sends the return to the spa and turns Pool High on. Leaving Spillover turns Pool High back off if Spillover turned it on. Spa turns both valves to the spa. If suction ends up on the spa with the return on the pool, tap Switch back right away."
+        if store.spillwayCircuit != nil, store.poolHigh == nil {
+            text += "\n\nNo Pool High circuit was found, so Spillover can't raise the pump speed. Set the Spillway circuit's pump speed at the panel instead."
+        }
+        if store.spillwayCircuit == nil {
+            text += "\n\nSpillover is off because no circuit on this controller has the Spillway function. Set one up at the EasyTouch panel or in Pentair's app, then reconnect."
+        }
+        return text
     }
 }

@@ -231,10 +231,22 @@ private struct BodyControls: View {
                     Task { await store.setHeatMode(which, heatOn ? .off : .heater) }
                 }
                 ForEach(extras) { circuit in
-                    ControlButton(title: circuit.name, systemImage: Theme.icon(for: circuit),
-                                  isOn: store.isOn(circuit), tint: tint,
-                                  isBusy: store.busy.contains(circuit.id)) {
-                        Task { await store.toggle(circuit) }
+                    if circuit.function == .spillway {
+                        // Spillover: suction from the pool, return to the spa so it spills over.
+                        let on = store.waterMode == .spillover
+                        ControlButton(title: "Spillover", systemImage: Theme.icon(for: circuit),
+                                      isOn: on, detail: on ? "Pump on high" : "Off", tint: tint,
+                                      isBusy: store.busy.contains(circuit.id)) {
+                            Task {
+                                if on { await store.endSpillover() } else { await store.switchMode(to: .spillover) }
+                            }
+                        }
+                    } else {
+                        ControlButton(title: circuit.name, systemImage: Theme.icon(for: circuit),
+                                      isOn: store.isOn(circuit), tint: tint,
+                                      isBusy: store.busy.contains(circuit.id)) {
+                            Task { await store.toggle(circuit) }
+                        }
                     }
                 }
             }
